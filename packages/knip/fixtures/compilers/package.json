@@ -1,3 +1,7 @@
 {
-  "name": "compilers"
+  "name": "compilers",
+  "devDependencies": {
+    "@mdx-js/mdx": "*",
+    "vue": "*"
+  }
 }

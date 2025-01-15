@@ -1,42 +1,37 @@
-import { timerify } from '../../util/Performance.js';
+import type { IsPluginEnabled, Plugin, ResolveConfig } from '../../types/config.js';
 import { hasDependency } from '../../util/plugin.js';
-import { getDependenciesDeep } from './helpers.js';
-import type { IsPluginEnabledCallback, GenericPluginCallback } from '../../types/plugins.js';
+import { getDependencies } from './helpers.js';
+import type { ESLintConfig } from './types.js';
 
-// Old: https://eslint.org/docs/latest/use/configure/configuration-files
-// New: https://eslint.org/docs/latest/use/configure/configuration-files-new
+// New: https://eslint.org/docs/latest/use/configure/configuration-files
+// Old: https://eslint.org/docs/latest/use/configure/configuration-files-deprecated
 
 // Note: shareable configs should use `peerDependencies` for plugins
 // https://eslint.org/docs/latest/extend/shareable-configs#publishing-a-shareable-config
 
-export const NAME = 'ESLint';
+const title = 'ESLint';
 
-/** @public */
-export const ENABLERS = ['eslint'];
+const enablers = ['eslint', '@eslint/js'];
 
-export const PACKAGE_JSON_PATH = 'eslintConfig';
-
-export const isEnabled: IsPluginEnabledCallback = ({ dependencies, manifest, config }) =>
-  hasDependency(dependencies, ENABLERS) ||
+const isEnabled: IsPluginEnabled = ({ dependencies, manifest, config }) =>
+  hasDependency(dependencies, enablers) ||
   'eslint' in config ||
   Boolean(manifest.name && /(^eslint-config|\/eslint-config)/.test(manifest.name));
 
-export const CONFIG_FILE_PATTERNS = [
-  'eslint.config.js',
-  '.eslintrc',
-  '.eslintrc.{js,json,cjs}',
-  '.eslintrc.{yml,yaml}',
-  'package.json',
-];
+const packageJsonPath = 'eslintConfig';
 
-const findESLintDependencies: GenericPluginCallback = async (configFilePath, { cwd, manifest, isProduction }) => {
-  if (isProduction) return [];
+const entry = ['eslint.config.{js,cjs,mjs}'];
 
-  // The new configuration format does not need custom dependency resolving (it has only imports)
-  if (configFilePath.endsWith('eslint.config.js')) return [];
+const config = ['.eslintrc', '.eslintrc.{js,json,cjs}', '.eslintrc.{yml,yaml}', 'package.json'];
 
-  const dependencies = await getDependenciesDeep(configFilePath, { cwd, manifest });
-  return Array.from(dependencies);
-};
+const resolveConfig: ResolveConfig<ESLintConfig> = (localConfig, options) => getDependencies(localConfig, options);
 
-export const findDependencies = timerify(findESLintDependencies);
+export default {
+  title,
+  enablers,
+  isEnabled,
+  packageJsonPath,
+  entry,
+  config,
+  resolveConfig,
+} satisfies Plugin;

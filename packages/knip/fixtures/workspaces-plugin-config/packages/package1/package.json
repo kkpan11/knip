@@ -1,10 +1,11 @@
 {
-  "name": "@workspaces-plugin-config/package-using-ava",
+  "name": "@workspaces-plugin-config/shared",
   "scripts": {
     "test": "ava"
   },
   "devDependencies": {
     "ava": "^5.3.1",
-    "webpack": "*"
+    "webpack": "*",
+    "@storybook/builder-vite": "*"
   }
 }

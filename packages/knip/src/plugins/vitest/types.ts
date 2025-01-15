@@ -5,6 +5,7 @@ interface VitestConfig {
       enabled?: boolean;
       provider: string;
     };
+    root?: string;
     environment?: string;
     globalSetup?: string | string[];
     reporters?: (string | unknown)[];
@@ -13,7 +14,12 @@ interface VitestConfig {
 }
 
 export interface ViteConfig extends VitestConfig {
-  plugins: unknown[];
+  plugins?: unknown[];
+  build?: {
+    lib?: {
+      entry: string | string[] | { [entryAlias: string]: string };
+    };
+  };
 }
 
 export type COMMAND = 'dev' | 'serve' | 'build';

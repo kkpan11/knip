@@ -4,7 +4,12 @@
     "ignoreWorkspaces": [
       "packages/c",
       "packages/d*",
-      "packages/f"
+      "packages/f",
+      "packages/g",
+      "packages/deep/**",
+      "packages/flat/*",
+      "packages/un/**/used",
+      "packages/wut/*"
     ]
   }
 }

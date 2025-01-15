@@ -1,6 +1,7 @@
 export interface NxProjectConfiguration {
   targets?: {
     [targetName: string]: {
+      command?: string;
       executor?: string;
       options?: {
         command?: string;
@@ -8,4 +9,15 @@ export interface NxProjectConfiguration {
       };
     };
   };
+}
+
+export interface NxConfigRoot {
+  plugins?: Array<
+    | string
+    | {
+        plugin: string;
+      }
+  >;
+  generators?: Record<string, unknown>;
+  targetDefaults?: Record<string, unknown>;
 }

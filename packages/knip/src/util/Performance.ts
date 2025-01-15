@@ -1,35 +1,53 @@
-import { performance, PerformanceObserver, PerformanceEntry } from 'node:perf_hooks';
+import { type PerformanceEntry, PerformanceObserver, performance } from 'node:perf_hooks';
+import { constants } from 'node:perf_hooks';
+import { memoryUsage } from 'node:process';
 import EasyTable from 'easy-table';
+import prettyMilliseconds from 'pretty-ms';
 import Summary from 'summary';
 import parsedArgValues from './cli-arguments.js';
-import type { TimerifyOptions } from 'node:perf_hooks';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Timerify = <T extends (...params: any[]) => any>(fn: T, options?: TimerifyOptions) => T;
+import { debugLog } from './debug.js';
 
 const { performance: isEnabled = false } = parsedArgValues;
 
-// Naming convention: _wrapped() functions are prefixed with an underscore
-export const timerify: Timerify = fn => (isEnabled ? performance.timerify(fn) : fn);
+export const timerify = <T extends (...params: any[]) => any>(fn: T, name: string = fn.name): T => {
+  if (!isEnabled) return fn;
+  return performance.timerify(Object.defineProperty(fn, 'name', { get: () => name }));
+};
 
-export class Performance {
+class Performance {
   isEnabled: boolean;
   startTime = 0;
   endTime = 0;
   entries: PerformanceEntry[] = [];
   instanceId?: number;
-  observer?: PerformanceObserver;
+  fnObserver?: PerformanceObserver;
+  gcObserver?: PerformanceObserver;
+  memoryUsageStart?: ReturnType<typeof memoryUsage>;
 
   constructor(isEnabled: boolean) {
     if (isEnabled) {
       this.startTime = performance.now();
       this.instanceId = Math.floor(performance.now() * 100);
-      this.observer = new PerformanceObserver(items => {
-        items.getEntries().forEach(entry => {
+
+      // timerified functions
+      this.fnObserver = new PerformanceObserver(items => {
+        for (const entry of items.getEntries()) {
           this.entries.push(entry);
-        });
+        }
       });
-      this.observer.observe({ entryTypes: ['function'] });
+      this.fnObserver.observe({ entryTypes: ['function'] });
+
+      // major garbage collection events
+      this.gcObserver = new PerformanceObserver(items => {
+        for (const item of items.getEntries()) {
+          if ((item.detail as { kind: number })?.kind === constants.NODE_PERFORMANCE_GC_MAJOR) {
+            debugLog('*', `GC (after ${prettyMilliseconds(item.startTime)} in ${prettyMilliseconds(item.duration)})`);
+          }
+        }
+      });
+      this.gcObserver.observe({ entryTypes: ['gc'] });
+
+      this.memoryUsageStart = memoryUsage();
     }
     this.isEnabled = isEnabled;
   }
@@ -68,7 +86,7 @@ export class Performance {
   getTable() {
     const entriesByName = this.getEntriesByName();
     const table = new EasyTable();
-    Object.entries(entriesByName).map(([name, values]) => {
+    for (const [name, values] of Object.entries(entriesByName)) {
       const stats = new Summary(values);
       table.cell('Name', name);
       table.cell('size', stats.size(), EasyTable.number(0));
@@ -77,24 +95,33 @@ export class Performance {
       table.cell('median', stats.median(), EasyTable.number(2));
       table.cell('sum', stats.sum(), EasyTable.number(2));
       table.newRow();
-    });
+    }
     table.sort(['sum|des']);
     return table.toString().trim();
   }
 
-  getTotalTime() {
-    return this.endTime - this.startTime;
+  getCurrentDurationInMs(startTime?: number) {
+    return performance.now() - (startTime ?? this.startTime);
+  }
+
+  getMemHeapUsage() {
+    return (memoryUsage().heapUsed ?? 0) - (this.memoryUsageStart?.heapUsed ?? 0);
+  }
+
+  getCurrentMemUsageInMb() {
+    return Math.round((this.getMemHeapUsage() / 1024 / 1024) * 100) / 100;
   }
 
   public async finalize() {
     if (!this.isEnabled) return;
-    this.endTime = performance.now();
     // Workaround to get all entries
     await this.flush();
   }
 
   public reset() {
     this.entries = [];
-    this.observer?.disconnect();
+    this.fnObserver?.disconnect();
   }
 }
+
+export const perfObserver = new Performance(isEnabled);

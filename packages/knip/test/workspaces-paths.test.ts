@@ -1,5 +1,5 @@
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { main } from '../src/index.js';
 import { resolve } from '../src/util/path.js';
 import baseArguments from './helpers/baseArguments.js';
@@ -13,7 +13,7 @@ test('Find unused files, dependencies and exports in workspaces (w/ paths)', asy
   });
 
   assert.equal(Object.keys(issues.unlisted).length, 1);
-  assert(issues.unlisted['packages/lib-e/src/index.ts']['not/found']);
+  assert(issues.unlisted['packages/lib-e/src/index.ts']['not']);
 
   assert.deepEqual(counters, {
     ...baseCounters,
