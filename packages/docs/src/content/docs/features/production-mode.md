@@ -4,8 +4,6 @@ sidebar:
   order: 1
 ---
 
-## Introduction
-
 The default mode for Knip is comprehensive and targets all project code,
 including configuration files, test files, Storybook stories, and so on. Test
 files usually import production files. This prevents production files or their
@@ -42,6 +40,19 @@ Here's what's included in production mode:
 - Only the `start` and `postinstall` scripts
 - Ignore exports with the [`@internal` tag][1]
 
+:::note
+
+The production run does not replace the default run. Depending on your needs you
+can run either of them or both separately. Usually both modes can share the same
+configuration.
+
+:::
+
+To see the difference between default and production mode in great detail, use
+the `--debug` flag and inspect what entry and project files are used, and the
+plugins that are enabled. For instance, in production mode this shows that files
+such as tests and Storybook files (stories) are excluded from the analysis.
+
 ## Strict Mode
 
 Additionally, the `--strict` flag can be added to:
@@ -56,6 +67,8 @@ Additionally, the `--strict` flag can be added to:
 knip --production --strict
 ```
 
+Using `--strict` implies `--production`, so the latter can be omitted.
+
 ## Types
 
 Add `--exclude types` if you don't want to include types in the report:
@@ -64,4 +77,4 @@ Add `--exclude types` if you don't want to include types in the report:
 knip --production --exclude types
 ```
 
-[1]: ../reference/jsdoc-tsdoc-tags.mdx#internal
+[1]: ../reference/jsdoc-tsdoc-tags.md#internal

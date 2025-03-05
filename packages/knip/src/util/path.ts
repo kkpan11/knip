@@ -1,4 +1,4 @@
-// eslint-disable-next-line n/no-restricted-import
+// biome-ignore lint/nursery/noRestrictedImports: ignore
 import path from 'node:path';
 import parsedArgValues from './cli-arguments.js';
 
@@ -9,6 +9,8 @@ export const isAbsolute = path.isAbsolute;
 export const dirname = path.posix.dirname;
 
 export const extname = path.posix.extname;
+
+export const basename = path.posix.basename;
 
 export const join = path.posix.join;
 
@@ -23,7 +25,7 @@ export const relative = (from: string, to?: string) => toPosix(path.relative(to 
 
 export const isInNodeModules = (filePath: string) => filePath.includes('node_modules');
 
-export const toAbsolute = (id: string, base: string) => (isAbsolute(id) ? id : join(base, id));
+export const toAbsolute = (id: string, base: string = cwd) => (isAbsolute(id) ? id : join(base, id));
 
 export const toRelative = (id: string) => (isAbsolute(id) ? relative(id) : id);
 

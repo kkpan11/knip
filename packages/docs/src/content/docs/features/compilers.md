@@ -4,149 +4,138 @@ title: Compilers
 
 Projects may have source files that are not JavaScript or TypeScript, and thus
 require compilation (or transpilation, or pre-processing, you name it). Files
-like `.mdx`, `.astro`, `.vue` and `.svelte` may also import other sources files
-and external dependencies. So ideally, these files are also included when
-linting the project. To this end, Knip supports a compiler for any file
-extension.
+like `.mdx`, `.astro`, `.vue` and `.svelte` may also import other source files
+and external dependencies. So ideally, these files are included when linting the
+project. That's why Knip supports compilers.
 
-## Prerequisites
+## Built-in compilers
 
-Since compilers are functions, the Knip config must to be in a dynamic `.js` or
-`.ts` file.
+Knip has built-in "compilers" for the following file extensions:
 
-:::tip[Note]
+- `.astro`
+- `.mdx`
+- `.svelte`
+- `.vue`
 
-Compilers will automatically have their extension added as a default extension
-to Knip. This means you don't need to add something like `**/*.{ts,astro}` to
-the `entry` or `project` file patterns manually. Run Knip in [debug mode][1] for
-details.
+Knip does not include real compilers for those files, but regular expressions to
+collect `import` statements. This is fast, requires no dependencies, and enough
+for Knip to build the module graph.
 
-:::
+On the other hand, real compilers may expose their own challenges in the context
+of Knip. For instance, the Svelte compiler keeps `exports` intact, while they
+might represent component properties. This results in those exports being
+reported as unused by Knip.
 
-## Interface
+The built-in functions seem to do a decent job, but override them however you
+like.
+
+## Custom compilers
+
+Built-in compilers can be overridden, and additional compilers can be added.
+Since compilers are functions, the Knip configuration file must be a dynamic
+`.js` or `.ts` file.
+
+### Interface
 
 The compiler function interface is straightforward. Text in, text out:
 
 ```ts
-(source: string) => string;
+(source: string, filename: string) => string;
 ```
 
 This may also be an `async` function.
 
 :::tip[Note]
 
-Some of the examples below do not use actual compilers. The goal is to return a
-valid module that can be parsed by the TypeScript compiler to find `import`
-statements.
+Compilers will automatically have their extension added as a default extension
+to Knip. This means you don't need to add something like `**/*.{ts,vue}` to the
+`entry` or `project` file patterns manually.
 
 :::
 
-## Examples
+### Svelte
 
-- [Astro][2]
-- [MDX][3]
-- [Vue][4]
-- [Svelte][5]
+In a project with Svelte, the compiler is automatically enabled, but you may
+have unresolved imports starting with `$app/`:
 
-### Astro
-
-Use a configuration like this to compile non-standard files in Astro projects:
-
-```ts
-import compile from '@mdx-js/mdx'; // Use v1
-
-export default {
-  compilers: {
-    astro: (text: string) => [...text.matchAll(/import[^;]+/g)].join('\n'),
-    css: (text: string) => [...text.matchAll(/(?<=@)import[^;]+/g)].join('\n'),
-    mdx: (text: string) => compile(text),
-  },
-};
+```shell
+Unresolved imports (5)
+$app/stores       src/routes/Header.svelte:1:9
+$app/environment  src/routes/about/+page.ts:1:9
 ```
 
-Depending on your project you may not need the `css` and/or `mdx` "compilers".
+In this case, you can manually add the `$app` path alias:
 
-Knip has an [Astro plugin][6] to save you some configuration. It's enabled
-automatically.
+```json title="knip.json"
+{
+  "paths": {
+    "$app/*": ["node_modules/@sveltejs/kit/src/runtime/app/*"]
+  }
+}
+```
 
-### MDX
+As a last resort, see [ignoredUnresolved][1] to ignore virtual import specifiers
+from the report.
 
-Here's an example using an actual compiler (`@mdx-js/mdx`):
+### CSS
+
+Here's an example, minimal compiler for CSS files:
 
 ```ts title="knip.ts"
-import compile from '@mdx-js/mdx'; // Use v1
-
-module.exports = {
-  entry: ['src/index.ts', '**/*.stories.mdx'],
+export default {
   compilers: {
-    mdx: (text: string) => compile(text),
+    css: (text: string) => [...text.matchAll(/(?<=@)import[^;]+/g)].join('\n'),
   },
 };
 ```
+
+You may wonder why the CSS compiler is not included by default. It's currently
+not clear if it should be included. And if so, what would be the best way to
+determine it should be enabled, and what syntax(es) it should support.
 
 ### Vue
 
-Here's an example "compiler" for `.vue` files in Vue projects:
+In a project with Vue, the compiler is automatically enabled. Override and use
+Vue's parser for better results if the built-in "compiler" is not enough:
 
-```ts title="knip.ts"
-const compiler = /<script\b[^>]*>([\s\S]*?)<\/script>/gm;
+```ts
+import type { KnipConfig } from 'knip';
+import {
+  parse,
+  type SFCScriptBlock,
+  type SFCStyleBlock,
+} from 'vue/compiler-sfc';
 
-export default {
+function getScriptBlockContent(block: SFCScriptBlock | null): string[] {
+  if (!block) return [];
+  if (block.src) return [`import '${block.src}'`];
+  return [block.content];
+}
+
+function getStyleBlockContent(block: SFCStyleBlock | null): string[] {
+  if (!block) return [];
+  if (block.src) return [`@import '${block.src}';`];
+  return [block.content];
+}
+
+function getStyleImports(content: string): string {
+  return [...content.matchAll(/(?<=@)import[^;]+/g)].join('\n');
+}
+
+const config = {
   compilers: {
-    vue: text => {
-      const scripts = [];
-      let match;
-      while ((match = compiler.exec(text))) scripts.push(match[1]);
-      return scripts.join(';');
+    vue: (text: string, filename: string) => {
+      const { descriptor } = parse(text, { filename, sourceMap: false });
+      return [
+        ...getScriptBlockContent(descriptor.script),
+        ...getScriptBlockContent(descriptor.scriptSetup),
+        ...descriptor.styles.flatMap(getStyleBlockContent).map(getStyleImports),
+      ].join('\n');
     },
   },
-};
+} satisfies KnipConfig;
+
+export default config;
 ```
 
-This is tested on a project generated using `npm init vue@latest`. Note that
-this is not a real compiler, but in many cases it's enough to extract and return
-the contents of the `<script>` elements as a TypeScript module.
-
-Knip does not have a Vue plugin, mainly because the entry file `src/main.ts` is
-already covered by the default entry patterns.
-
-### Svelte
-
-Use a configuration like this to compile non-standard files in Svelte projects:
-
-```ts title="knip.ts"
-import sveltePreprocess from 'svelte-preprocess';
-import { preprocess, compile } from 'svelte/compiler';
-
-const sveltePreprocessor = sveltePreprocess();
-
-export default {
-  paths: {
-    // This ain't pretty, but Svelte basically does the same
-    '$app/*': ['node_modules/@sveltejs/kit/src/runtime/app/*'],
-    '$env/*': ['.svelte-kit/ambient.d.ts'],
-  },
-  compilers: {
-    svelte: async (text: string) => {
-      const processed = await preprocess(text, sveltePreprocessor, {
-        filename: 'dummy.ts',
-      });
-      const compiled = compile(processed.code);
-      return compiled.js.code;
-    },
-    css: (text: string) => [...text.matchAll(/(?<=@)import[^;]+/g)].join('\n'),
-  },
-};
-```
-
-The compiler for `.svelte` files in this example is the actual Svelte compiler,
-this is the recommended way whenever available. Knip has a [Svelte plugin][7] to
-save you some configuration. It's enabled automatically.
-
-[1]: ../reference/cli.md#--debug
-[2]: #astro
-[3]: #mdx
-[4]: #vue
-[5]: #svelte
-[6]: ../reference/plugins/astro.md
-[7]: ../reference/plugins/svelte.md
+[1]: ../reference/configuration.md#ignoreunresolved

@@ -1,39 +1,34 @@
-import { isInternal } from '../../util/path.js';
-import { timerify } from '../../util/Performance.js';
-import { hasDependency, load } from '../../util/plugin.js';
-import type { PluginConfig } from './types.js';
-import type { IsPluginEnabledCallback, GenericPluginCallback } from '../../types/plugins.js';
+import type { IsPluginEnabled, Plugin, ResolveConfig } from '../../types/config.js';
+import { type Input, toDeferResolve } from '../../util/input.js';
+import { toCosmiconfig } from '../../util/plugin-config.js';
+import { hasDependency } from '../../util/plugin.js';
+import type { BaseStyleLintConfig, StyleLintConfig } from './types.js';
 
 // https://stylelint.io/user-guide/configure/
 
-export const NAME = 'Stylelint';
+const title = 'Stylelint';
 
-/** @public */
-export const ENABLERS = ['stylelint'];
+const enablers = ['stylelint'];
 
-export const isEnabled: IsPluginEnabledCallback = ({ dependencies }) => hasDependency(dependencies, ENABLERS);
+const isEnabled: IsPluginEnabled = ({ dependencies }) => hasDependency(dependencies, enablers);
 
-export const CONFIG_FILE_PATTERNS = [
-  '.stylelintrc',
-  '.stylelintrc.{cjs,js,json,yaml,yml}',
-  'stylelint.config.{cjs,mjs,js}',
-];
+const config = ['package.json', ...toCosmiconfig('stylelint')];
 
-const findPluginDependencies: GenericPluginCallback = async (configFilePath, options) => {
-  const { manifest, isProduction } = options;
+const resolve = (config: StyleLintConfig | BaseStyleLintConfig): Input[] => {
+  const extend = config.extends ?? [];
+  const plugins = config.plugins ?? [];
+  const customSyntax: string[] = typeof config.customSyntax === 'string' ? [config.customSyntax] : [];
 
-  if (isProduction) return [];
-
-  const localConfig: PluginConfig | undefined = configFilePath.endsWith('package.json')
-    ? manifest.stylelint
-    : await load(configFilePath);
-
-  if (!localConfig) return [];
-
-  const extend = localConfig.extends ? [localConfig.extends].flat().filter(extend => !isInternal(extend)) : [];
-  const plugins = localConfig.plugins ? [localConfig.plugins].flat().filter(plugin => !isInternal(plugin)) : [];
-
-  return [...extend, ...plugins];
+  const overrideConfigs = 'overrides' in config ? config.overrides.flatMap(resolve) : [];
+  return [...[extend, plugins, customSyntax].flat().map(toDeferResolve), ...overrideConfigs];
 };
 
-export const findDependencies = timerify(findPluginDependencies);
+const resolveConfig: ResolveConfig<StyleLintConfig> = config => resolve(config);
+
+export default {
+  title,
+  enablers,
+  isEnabled,
+  config,
+  resolveConfig,
+} satisfies Plugin;

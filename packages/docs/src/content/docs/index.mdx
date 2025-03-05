@@ -1,74 +1,166 @@
 ---
-title: Knip
+title: Declutter your JavaScript & TypeScript projects
 description:
-  Project linter to find unused files, dependencies and exports in JavaScript
-  and TypeScript projects
+  Project linter to find and remove unused files, dependencies and exports in
+  JavaScript and TypeScript projects
 template: splash
 hero:
-  tagline:
-    Find unused files, dependencies and exports in JavaScript and TypeScript
-    projects
+  title: Knip
+  tagline: Declutter your JavaScript & TypeScript projects
   image:
     file: ../../assets/logo.svg
   actions:
     - text: Let's Get Started
-      link: ./overview/getting-started/
+      link: ./overview/getting-started
       icon: right-arrow
       variant: primary
-    - text: 'NEW: Announcing Knip v3'
-      link: ./blog/knip-v3/
+    - text: 'BLOG: The State of Knip'
+      link: /blog/state-of-knip
+      icon: document
       variant: secondary
     - text: View on GitHub
-      link: https://github.com/webpro/knip
+      link: https://github.com/webpro-nl/knip
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
-import Tweets from '../../components/Tweets.astro';
+import { YouTube } from '@astro-community/astro-embed-youtube';
+import Posts from '../../components/Posts.astro';
+import Sponsors from '../../components/Sponsors.astro';
+import Projects from '../../components/Projects.astro';
 import Contributors from '../../components/Contributors.astro';
 
-<CardGrid stagger>
-  <Card title="Getting Started" icon="rocket">
-    Read [getting started][1] to install and run Knip
+:::section{.badges}
+
+[![NPM Version][2]][1] [![NPM Downloads][3]][1] [![GitHub Repo   stars][5]][4]
+
+:::
+
+:a[Sponsored by:]{href="/sponsors" class="sponsors-intro"}
+
+<Sponsors direction="row" showAll={false} />
+
+:::div{.sponsor}
+
+[Become a Sponsor][6]
+
+:::
+
+<CardGrid>
+  <Card title="Why use Knip?" icon="approve-check">
+
+    Knip finds and fixes unused files, dependencies and exports. Use it for
+    enhanced code and dependency management.
+
   </Card>
-  <Card title="Why Use Knip?" icon="approve-check">
-    Understand [what Knip can do for you][2]
+
+  <Card title="How does it work?" icon="setting">
+
+    Advanced analysis starting from fine-grained entry points based on the
+    actual frameworks and tooling in (mono)repos for accurate and actionable
+    results.
+
   </Card>
+
+  <Card title="Battle-tested" icon="approve-check">
+
+    Thousands of projects are already using Knip!
+
+  </Card>
+
+  <Card title="Plugins" icon="open-book">
+
+    Knip comes with [over 90 plugins][7] for tools and frameworks like Astro,
+    Cypress, ESLint, Jest, GitHub Actions, Next.js, Nx, Remix, Storybook,
+    Svelte, Vite, Vitest, Webpack and many many more.
+
+  </Card>
+
+  <Card title="Playground" icon="rocket">
+
+    Try Knip on the [playground][8].
+
+  </Card>
+
   <Card title="Troubleshooting" icon="warning">
-    Need help? [Start troubleshooting here][3]
-  </Card>
-  <Card title="Plugins" icon="list-format">
-    Check out the [list of plugins][4]
+
+    Need help? [Start troubleshooting][9].
+
   </Card>
 </CardGrid>
 
-## 🧡 Contributors
+## Trusted by the world's best software teams
 
-Special thanks to the wonderful people who have contributed to this project!
+:::section{.projects}
+
+<Projects />
+
+:::
+
+## Introduction video
+
+[James Shopland][10] has a great introduction and overview of Knip (thanks
+James!):
+
+<YouTube id="uhEkgWt-pUM" />
+
+## Created by awesome contributors
+
+Special thanks to the wonderful people who have contributed to this project:
 
 <Contributors />
 
-## 🧡 Articles
+## Articles about Knip
 
+A curated selection of articles about Knip, most recent first:
+
+- Tom MacWright: [Knip: good software for cleaning up TypeScript tech debt][11]
+  (2024-10-25)
+- [มาทำความสะอาด Project โค้ดของเราด้วย Knip กัน][12] (2024-10-22/Thai 🇹🇭)
+- Anthony Pena: [Knip: l'ultime outil pour faire le ménage dans vos
+  projets!][13] (2024-10-08/French 🇫🇷)
+- Taro: [TypeScript/JavaScriptの不要なコードを削除するツール「Knip」の紹介][14]
+  (2024-07-25/Japanese 🇯🇵)
+- Maddy Miller: [Using Knip to find dead code in a high-traffic git repo][15]
+  (2023-09-17)
+- Josh Goldberg: [Speeding Up Centered Part 4: Unused Code Bloat][16]
+  (2023-08-21)
 - Smashing Magazine: [Knip: An Automated Tool For Finding Unused Files, Exports,
-  And Dependencies][5]
+  And Dependencies][17] (2023-08-14)
 - Effective TypeScript: [Recommendation Update: ✂️ Use knip to detect dead code
-  and types][6]
-- Maddy Miller: [Using Knip to find dead code in a high-traffic git repo][7]
-- Josh Goldberg: [Speeding Up Centered Part 4: Unused Code Bloat][8]
+  and types][18] (2023-07-29)
 
-## 🧡 Testimonials
+## Don't just take our word for it
 
-<Tweets />
+<Posts />
 
-[1]: ./overview/getting-started.mdx
-[2]: ./explanations/why-use-knip.md
-[3]: ./guides/troubleshooting.md
-[4]: ./reference/plugins.md
-[5]:
-  https://www.smashingmagazine.com/2023/08/knip-automated-tool-find-unused-files-exports-dependencies/
-[6]: https://effectivetypescript.com/2023/07/29/knip/
-[7]: https://madelinemiller.dev/blog/knip-dead-code/
-[8]:
+## Read More
+
+- [Unused dependencies][19]
+- [Unused exports][20]
+
+[1]: https://www.npmjs.com/package/knip
+[2]: https://img.shields.io/npm/v/knip?color=f56e0f
+[3]: https://img.shields.io/npm/dm/knip?color=f56e0f
+[4]: https://github.com/webpro-nl/knip
+[5]: https://img.shields.io/github/stars/webpro-nl/knip?style=flat&color=f56e0f
+[6]: ./sponsors
+[7]: ./reference/plugins.md
+[8]: ./playground
+[9]: ./guides/troubleshooting.md
+[10]: https://www.jamesshopland.com
+[11]: https://macwright.com/2024/10/25/good-software-knip
+[12]:
+  https://engineering.thinknet.co.th/%E0%B8%A1%E0%B8%B2%E0%B8%97%E0%B8%B3%E0%B8%84%E0%B8%A7%E0%B8%B2%E0%B8%A1%E0%B8%AA%E0%B8%B0%E0%B8%AD%E0%B8%B2%E0%B8%94-project-%E0%B9%82%E0%B8%84%E0%B9%89%E0%B8%94%E0%B8%82%E0%B8%AD%E0%B8%87%E0%B9%80%E0%B8%A3%E0%B8%B2%E0%B8%94%E0%B9%89%E0%B8%A7%E0%B8%A2-knip-%E0%B8%81%E0%B8%B1%E0%B8%99-20dbd65f6b58
+[13]:
+  https://k49.fr.nf/knip-l-ultime-outil-pour-faire-le-menage-dans-vos-projets/
+[14]: https://tech.basemachina.jp/entry/introduction-knip
+[15]: https://madelinemiller.dev/blog/knip-dead-code/
+[16]:
   https://www.joshuakgoldberg.com/blog/speeding-up-centered-part-4-unused-code-bloat/
+[17]:
+  https://www.smashingmagazine.com/2023/08/knip-automated-tool-find-unused-files-exports-dependencies/
+[18]: https://effectivetypescript.com/2023/07/29/knip/
+[19]: ./typescript/unused-dependencies.md
+[20]: ./typescript/unused-exports.md

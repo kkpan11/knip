@@ -1,17 +1,34 @@
 import { isBuiltin } from 'node:module';
+import type { Workspace } from './ConfigurationChief.js';
+import { PackageJsonPeeker } from './PackageJsonPeeker.js';
 import {
-  IGNORE_DEFINITELY_TYPED,
+  DT_SCOPE,
   IGNORED_DEPENDENCIES,
   IGNORED_GLOBAL_BINARIES,
+  IGNORED_RUNTIME_DEPENDENCIES,
+  IGNORE_DEFINITELY_TYPED,
   ROOT_WORKSPACE_NAME,
 } from './constants.js';
-import { isDefinitelyTyped, getDefinitelyTypedFor, getPackageFromDefinitelyTyped } from './util/modules.js';
-import type { Workspace } from './ConfigurationChief.js';
-import type { ConfigurationHints, Issue } from './types/issues.js';
-import type { WorkspaceManifests, HostDependencies, InstalledBinaries } from './types/workspace.js';
-import type { PackageJson } from '@npmcli/package-json';
+import { getDependencyMetaData } from './manifest/index.js';
+import type { ConfigurationHints, Counters, Issue, Issues, SymbolIssueType } from './types/issues.js';
+import type { PackageJson } from './types/package-json.js';
+import type {
+  DependencyArray,
+  DependencySet,
+  HostDependencies,
+  InstalledBinaries,
+  WorkspaceManifests,
+} from './types/workspace.js';
+import {
+  getDefinitelyTypedFor,
+  getPackageFromDefinitelyTyped,
+  getPackageNameFromModuleSpecifier,
+  isDefinitelyTyped,
+} from './util/modules.js';
+import { findMatch, toRegexOrString } from './util/regex.js';
 
 type Options = {
+  isProduction: boolean;
   isStrict: boolean;
 };
 
@@ -20,8 +37,10 @@ type Options = {
  * - Stores referenced external dependencies
  * - Stores binaries and peer dependencies
  * - Settles dependency issues
+ * - Provides configuration hints
  */
 export class DependencyDeputy {
+  isProduction;
   isStrict;
   _manifests: WorkspaceManifests = new Map();
   referencedDependencies: Map<string, Set<string>>;
@@ -29,10 +48,9 @@ export class DependencyDeputy {
   hostDependencies: Map<string, HostDependencies>;
   installedBinaries: Map<string, InstalledBinaries>;
   hasTypesIncluded: Map<string, Set<string>>;
-  ignoreBinaries: string[] = [];
-  ignoreDependencies: string[] = [];
 
-  constructor({ isStrict }: Options) {
+  constructor({ isProduction, isStrict }: Options) {
+    this.isProduction = isProduction;
     this.isStrict = isStrict;
     this.referencedDependencies = new Map();
     this.referencedBinaries = new Map();
@@ -43,20 +61,25 @@ export class DependencyDeputy {
 
   public addWorkspace({
     name,
+    cwd,
     dir,
     manifestPath,
+    manifestStr,
     manifest,
     ignoreDependencies,
     ignoreBinaries,
+    ignoreUnresolved,
   }: {
     name: string;
+    cwd: string;
     dir: string;
     manifestPath: string;
+    manifestStr: string;
     manifest: PackageJson;
-    ignoreDependencies: string[];
-    ignoreBinaries: string[];
+    ignoreDependencies: (string | RegExp)[];
+    ignoreBinaries: (string | RegExp)[];
+    ignoreUnresolved: (string | RegExp)[];
   }) {
-    const scripts = Object.values(manifest.scripts ?? {}) as string[];
     const dependencies = Object.keys(manifest.dependencies ?? {});
     const peerDependencies = Object.keys(manifest.peerDependencies ?? {});
     const optionalDependencies = Object.keys(manifest.optionalDependencies ?? {});
@@ -71,39 +94,59 @@ export class DependencyDeputy {
     const devDependencies = Object.keys(manifest.devDependencies ?? {});
     const allDependencies = [...dependencies, ...devDependencies, ...peerDependencies, ...optionalDependencies];
 
+    const packageNames = [
+      ...dependencies,
+      ...(this.isStrict ? peerDependencies : []),
+      ...(this.isProduction ? [] : devDependencies),
+    ];
+
+    const { hostDependencies, installedBinaries, hasTypesIncluded } = getDependencyMetaData({
+      packageNames,
+      dir,
+      cwd,
+    });
+
+    this.setHostDependencies(name, hostDependencies);
+    this.setInstalledBinaries(name, installedBinaries);
+    this.setHasTypesIncluded(name, hasTypesIncluded);
+
     this._manifests.set(name, {
       workspaceDir: dir,
       manifestPath,
-      ignoreDependencies,
-      ignoreBinaries,
-      scripts,
+      manifestStr,
+      ignoreDependencies: ignoreDependencies.map(toRegexOrString),
+      ignoreBinaries: ignoreBinaries.map(toRegexOrString),
+      ignoreUnresolved: ignoreUnresolved.map(toRegexOrString),
+      usedIgnoreDependencies: new Set<string | RegExp>(),
+      usedIgnoreBinaries: new Set<string | RegExp>(),
+      usedIgnoreUnresolved: new Set<string | RegExp>(),
       dependencies,
-      peerDependencies,
-      optionalPeerDependencies,
-      optionalDependencies,
       devDependencies,
-      allDependencies,
+      peerDependencies: new Set(peerDependencies),
+      optionalPeerDependencies,
+      allDependencies: new Set(allDependencies),
     });
-  }
-
-  addIgnored(ignoreBinaries: string[], ignoreDependencies: string[]) {
-    this.ignoreBinaries = ignoreBinaries;
-    this.ignoreDependencies = ignoreDependencies;
   }
 
   getWorkspaceManifest(workspaceName: string) {
     return this._manifests.get(workspaceName);
   }
 
-  getProductionDependencies(workspaceName: string) {
+  getProductionDependencies(workspaceName: string): DependencyArray {
     const manifest = this._manifests.get(workspaceName);
     if (!manifest) return [];
     if (this.isStrict) return [...manifest.dependencies, ...manifest.peerDependencies];
     return manifest.dependencies;
   }
 
-  getDevDependencies(workspaceName: string) {
+  getDevDependencies(workspaceName: string): DependencyArray {
     return this._manifests.get(workspaceName)?.devDependencies ?? [];
+  }
+
+  getDependencies(workspaceName: string): DependencySet {
+    const manifest = this._manifests.get(workspaceName);
+    if (!manifest) return new Set();
+    return new Set([...manifest.dependencies, ...manifest.devDependencies]);
   }
 
   setInstalledBinaries(workspaceName: string, installedBinaries: Map<string, Set<string>>) {
@@ -119,7 +162,7 @@ export class DependencyDeputy {
   }
 
   getHasTypesIncluded(workspaceName: string) {
-    return this.installedBinaries.get(workspaceName);
+    return this.hasTypesIncluded.get(workspaceName);
   }
 
   addReferencedDependency(workspaceName: string, packageName: string) {
@@ -136,21 +179,15 @@ export class DependencyDeputy {
     this.referencedBinaries.get(workspaceName)?.add(binaryName);
   }
 
-  addHostDependencies(workspaceName: string, hostDependencies: HostDependencies) {
+  setHostDependencies(workspaceName: string, hostDependencies: HostDependencies) {
     this.hostDependencies.set(workspaceName, hostDependencies);
   }
 
   getHostDependenciesFor(workspaceName: string, dependency: string) {
-    return Array.from(this.hostDependencies.get(workspaceName)?.get(dependency) ?? []);
+    return this.hostDependencies.get(workspaceName)?.get(dependency) ?? [];
   }
 
-  getPeerDependencies(workspaceName: string) {
-    const manifest = this._manifests.get(workspaceName);
-    if (!manifest) return [];
-    return manifest.peerDependencies;
-  }
-
-  getOptionalPeerDependencies(workspaceName: string) {
+  getOptionalPeerDependencies(workspaceName: string): DependencyArray {
     const manifest = this._manifests.get(workspaceName);
     if (!manifest) return [];
     return manifest.optionalPeerDependencies;
@@ -162,6 +199,7 @@ export class DependencyDeputy {
    */
   public maybeAddReferencedExternalDependency(workspace: Workspace, packageName: string): boolean {
     if (isBuiltin(packageName)) return true;
+    if (IGNORED_RUNTIME_DEPENDENCIES.has(packageName)) return true;
 
     // Ignore self-referenced imports
     if (packageName === workspace.pkgName) return true;
@@ -175,21 +213,18 @@ export class DependencyDeputy {
       typesPackageName && workspaceNames.find(name => this.isInDependencies(name, typesPackageName));
 
     if (closestWorkspaceName || closestWorkspaceNameForTypes) {
-      closestWorkspaceName && this.addReferencedDependency(closestWorkspaceName, packageName);
-      closestWorkspaceNameForTypes && this.addReferencedDependency(closestWorkspaceNameForTypes, typesPackageName);
+      if (closestWorkspaceName) this.addReferencedDependency(closestWorkspaceName, packageName);
+      if (closestWorkspaceNameForTypes && !this.hasTypesIncluded.get(closestWorkspaceNameForTypes)?.has(packageName))
+        this.addReferencedDependency(closestWorkspaceNameForTypes, typesPackageName);
       return true;
-    } else {
-      this.addReferencedDependency(workspace.name, packageName);
     }
-
-    if (this.getWorkspaceManifest(workspace.name)?.ignoreDependencies.includes(packageName)) return true;
-    if (this.ignoreDependencies.includes(packageName)) return true;
+    this.addReferencedDependency(workspace.name, packageName);
 
     return false;
   }
 
   public maybeAddReferencedBinary(workspace: Workspace, binaryName: string): boolean {
-    if (IGNORED_GLOBAL_BINARIES.includes(binaryName)) return true;
+    if (IGNORED_GLOBAL_BINARIES.has(binaryName)) return true;
 
     this.addReferencedBinary(workspace.name, binaryName);
 
@@ -200,14 +235,11 @@ export class DependencyDeputy {
       if (binaries?.has(binaryName)) {
         const dependencies = binaries.get(binaryName);
         if (dependencies?.size) {
-          dependencies.forEach(dependency => this.addReferencedDependency(name, dependency));
+          for (const dependency of dependencies) this.addReferencedDependency(name, dependency);
           return true;
         }
       }
     }
-
-    if (this.getWorkspaceManifest(workspace.name)?.ignoreBinaries.includes(binaryName)) return true;
-    if (this.ignoreBinaries.includes(binaryName)) return true;
 
     return false;
   }
@@ -215,8 +247,8 @@ export class DependencyDeputy {
   private isInDependencies(workspaceName: string, packageName: string) {
     const manifest = this._manifests.get(workspaceName);
     if (!manifest) return false;
-    const dependencies = this.isStrict ? this.getProductionDependencies(workspaceName) : manifest.allDependencies;
-    return dependencies.includes(packageName);
+    if (this.isStrict) return this.getProductionDependencies(workspaceName).includes(packageName);
+    return manifest.allDependencies.has(packageName);
   }
 
   public settleDependencyIssues() {
@@ -224,24 +256,10 @@ export class DependencyDeputy {
     const devDependencyIssues: Issue[] = [];
     const optionalPeerDependencyIssues: Issue[] = [];
 
-    for (const [workspaceName, { manifestPath, ignoreDependencies, ignoreBinaries }] of this._manifests.entries()) {
-      const referencedDependencies = this.referencedDependencies.get(workspaceName);
-      const installedBinaries = this.getInstalledBinaries(workspaceName);
-      const hasTypesIncluded = this.getHasTypesIncluded(workspaceName);
-      const ignoreBins = [...IGNORED_GLOBAL_BINARIES, ...this.ignoreBinaries, ...ignoreBinaries];
-      const ignoreDeps = [...IGNORED_DEPENDENCIES, ...this.ignoreDependencies, ...ignoreDependencies];
-
-      const isNotIgnoredDependency = (packageName: string) => !ignoreDeps.includes(packageName);
-
-      const isNotIgnoredBinary = (packageName: string) => {
-        if (installedBinaries?.has(packageName)) {
-          const binaryNames = installedBinaries.get(packageName);
-          if (binaryNames) {
-            if (ignoreBins.some(ignoredBinary => binaryNames.has(ignoredBinary))) return false;
-          }
-        }
-        return true;
-      };
+    for (const [workspace, { manifestPath: filePath, manifestStr }] of this._manifests.entries()) {
+      const referencedDependencies = this.referencedDependencies.get(workspace);
+      const hasTypesIncluded = this.getHasTypesIncluded(workspace);
+      const peeker = new PackageJsonPeeker(manifestStr);
 
       // Keeping track of peer dependency recursions to prevent infinite loops for circularly referenced peer deps
       const peerDepRecs: Record<string, number> = {};
@@ -254,131 +272,183 @@ export class DependencyDeputy {
         if (isPeerDep && peerDepRecs[dependency]) return false;
 
         const [scope, typedDependency] = dependency.split('/');
-        if (scope === '@types') {
-          // The `pkg` dependency already has types included, i.e. this `@types/pkg` is obsolete
-          if (hasTypesIncluded?.has(typedDependency)) return false;
-
+        if (scope === DT_SCOPE) {
           const typedPackageName = getPackageFromDefinitelyTyped(typedDependency);
           // Ignore `@types/*` packages that don't have a related dependency (e.g. `@types/node`)
-          if (IGNORE_DEFINITELY_TYPED.includes(typedPackageName)) return true;
+          if (IGNORE_DEFINITELY_TYPED.has(typedPackageName)) return true;
+
+          // The `pkg` dependency already has types included, i.e. this `@types/pkg` is obsolete
+          if (hasTypesIncluded?.has(typedPackageName)) return false;
 
           // Ignore typed dependencies that have a host dependency that's referenced
           // Example: `next` (host) has `react-dom` and/or `@types/react-dom` (peer), peers can be ignored if host `next` is referenced
           const hostDependencies = [
-            ...this.getHostDependenciesFor(workspaceName, dependency),
-            ...this.getHostDependenciesFor(workspaceName, typedPackageName),
+            ...this.getHostDependenciesFor(workspace, dependency),
+            ...this.getHostDependenciesFor(workspace, typedPackageName),
           ];
-          if (hostDependencies.length) return !!hostDependencies.find(host => isReferencedDependency(host, true));
+          if (hostDependencies.length) return !!hostDependencies.find(host => isReferencedDependency(host.name, true));
 
-          if (!referencedDependencies) return false;
+          if (!referencedDependencies?.has(dependency)) return false;
 
           return referencedDependencies.has(typedPackageName);
         }
 
         // A dependency may not be referenced, but it may be a peer dep of another.
         // If that host is also not referenced we'll report this dependency as unused.
-        const hostDependencies = this.getHostDependenciesFor(workspaceName, dependency);
+        // Except if the host has this dependency as an optional peer dep itself.
+        const hostDependencies = this.getHostDependenciesFor(workspace, dependency);
 
-        hostDependencies.forEach(dep => (!peerDepRecs[dep] ? (peerDepRecs[dep] = 1) : peerDepRecs[dep]++));
-        return hostDependencies.some(peerDependency => isReferencedDependency(peerDependency, true));
+        for (const { name } of hostDependencies) {
+          if (!peerDepRecs[name]) peerDepRecs[name] = 1;
+          else peerDepRecs[name]++;
+        }
+
+        return hostDependencies.some(
+          hostDependency =>
+            (isPeerDep === false || !hostDependency.isPeerOptional) && isReferencedDependency(hostDependency.name, true)
+        );
       };
 
-      const isNotReferencedDependency = (dependency: string): boolean => !isReferencedDependency(dependency);
+      const isNotReferencedDependency = (dependency: string): boolean => !isReferencedDependency(dependency, false);
 
-      const pd = this.getProductionDependencies(workspaceName);
-      const dd = this.getDevDependencies(workspaceName);
-      const od = this.getOptionalPeerDependencies(workspaceName);
+      for (const symbol of this.getProductionDependencies(workspace).filter(isNotReferencedDependency)) {
+        const position = peeker.getLocation('dependencies', symbol);
+        dependencyIssues.push({ type: 'dependencies', workspace, filePath, symbol, ...position });
+      }
 
-      pd.filter(isNotIgnoredDependency)
-        .filter(isNotIgnoredBinary)
-        .filter(isNotReferencedDependency)
-        .forEach(symbol => dependencyIssues.push({ type: 'dependencies', filePath: manifestPath, symbol }));
+      for (const symbol of this.getDevDependencies(workspace).filter(isNotReferencedDependency)) {
+        const position = peeker.getLocation('devDependencies', symbol);
+        devDependencyIssues.push({ type: 'devDependencies', filePath, workspace, symbol, ...position });
+      }
 
-      dd.filter(isNotIgnoredDependency)
-        .filter(isNotIgnoredBinary)
-        .filter(isNotReferencedDependency)
-        .forEach(symbol => devDependencyIssues.push({ type: 'devDependencies', filePath: manifestPath, symbol }));
-
-      od.filter(isNotIgnoredDependency)
-        .filter(isNotIgnoredBinary)
-        .filter(p => isReferencedDependency(p))
-        .forEach(symbol =>
-          optionalPeerDependencyIssues.push({ type: 'optionalPeerDependencies', filePath: manifestPath, symbol })
-        );
+      for (const symbol of this.getOptionalPeerDependencies(workspace).filter(d => isReferencedDependency(d))) {
+        const pos = peeker.getLocation('optionalPeerDependencies', symbol);
+        optionalPeerDependencyIssues.push({ type: 'optionalPeerDependencies', filePath, workspace, symbol, ...pos });
+      }
     }
 
     return { dependencyIssues, devDependencyIssues, optionalPeerDependencyIssues };
   }
 
+  handleIgnoredDependencies(issues: Issues, counters: Counters, type: SymbolIssueType) {
+    for (const key in issues[type]) {
+      const issueSet = issues[type][key];
+      for (const issueKey in issueSet) {
+        const issue = issueSet[issueKey];
+        const packageName = getPackageNameFromModuleSpecifier(issue.symbol);
+        if (!packageName) continue;
+        if (IGNORED_DEPENDENCIES.has(packageName)) {
+          delete issueSet[issueKey];
+          counters[type]--;
+        } else {
+          const manifest = this.getWorkspaceManifest(issue.workspace);
+          if (manifest) {
+            const ignoreItem = findMatch(manifest.ignoreDependencies, packageName);
+            if (ignoreItem) {
+              delete issueSet[issueKey];
+              counters[type]--;
+              manifest.usedIgnoreDependencies.add(ignoreItem);
+            } else if (issue.workspace !== ROOT_WORKSPACE_NAME) {
+              const manifest = this.getWorkspaceManifest(ROOT_WORKSPACE_NAME);
+              if (manifest) {
+                const ignoreItem = findMatch(manifest.ignoreDependencies, packageName);
+                if (ignoreItem) {
+                  delete issueSet[issueKey];
+                  counters[type]--;
+                  manifest.usedIgnoreDependencies.add(ignoreItem);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  handleIgnoredBinaries(issues: Issues, counters: Counters, type: SymbolIssueType) {
+    for (const key in issues[type]) {
+      const issueSet = issues[type][key];
+      for (const issueKey in issueSet) {
+        const issue = issueSet[issueKey];
+        if (IGNORED_GLOBAL_BINARIES.has(issue.symbol)) {
+          delete issueSet[issueKey];
+          counters[type]--;
+          continue;
+        }
+        const manifest = this.getWorkspaceManifest(issue.workspace);
+        if (manifest) {
+          const ignoreItem = findMatch(manifest.ignoreBinaries, issue.symbol);
+          if (ignoreItem) {
+            delete issueSet[issueKey];
+            counters[type]--;
+            manifest.usedIgnoreBinaries.add(ignoreItem);
+          } else {
+            const manifest = this.getWorkspaceManifest(ROOT_WORKSPACE_NAME);
+            if (manifest) {
+              const ignoreItem = findMatch(manifest.ignoreBinaries, issue.symbol);
+              if (ignoreItem) {
+                delete issueSet[issueKey];
+                counters[type]--;
+                manifest.usedIgnoreBinaries.add(ignoreItem);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  handleIgnoredUnresolved(issues: Issues, counters: Counters) {
+    for (const key in issues.unresolved) {
+      const issueSet = issues.unresolved[key];
+      for (const issueKey in issueSet) {
+        const issue = issueSet[issueKey];
+        const manifest = this.getWorkspaceManifest(issue.workspace);
+        if (manifest) {
+          const ignoreItem = findMatch(manifest.ignoreUnresolved, issue.symbol);
+          if (ignoreItem) {
+            delete issueSet[issueKey];
+            counters.unresolved--;
+            manifest.usedIgnoreUnresolved.add(ignoreItem);
+          }
+        }
+      }
+    }
+  }
+
+  public removeIgnoredIssues({ issues, counters }: { issues: Issues; counters: Counters }) {
+    this.handleIgnoredDependencies(issues, counters, 'dependencies');
+    this.handleIgnoredDependencies(issues, counters, 'devDependencies');
+    this.handleIgnoredDependencies(issues, counters, 'optionalPeerDependencies');
+    this.handleIgnoredDependencies(issues, counters, 'unlisted');
+    this.handleIgnoredDependencies(issues, counters, 'unresolved');
+    this.handleIgnoredBinaries(issues, counters, 'binaries');
+    this.handleIgnoredUnresolved(issues, counters);
+  }
+
   public getConfigurationHints() {
     const configurationHints: ConfigurationHints = new Set();
 
-    const rootIgnoreBinaries = Object.fromEntries(this.ignoreBinaries.map(key => [key, 0]));
-    const rootIgnoreDependencies = Object.fromEntries(this.ignoreDependencies.map(key => [key, 0]));
+    for (const [workspaceName, manifest] of this._manifests.entries()) {
+      for (const identifier of manifest.ignoreDependencies) {
+        if (!manifest.usedIgnoreDependencies.has(identifier)) {
+          configurationHints.add({ workspaceName, identifier, type: 'ignoreDependencies' });
+        }
+      }
 
-    for (const [workspaceName, { ignoreDependencies, ignoreBinaries }] of this._manifests.entries()) {
-      const referencedDependencies = this.referencedDependencies.get(workspaceName);
-      const referencedBinaries = this.referencedBinaries.get(workspaceName);
-      const installedBinaries = this.getInstalledBinaries(workspaceName);
+      for (const identifier of manifest.ignoreBinaries) {
+        if (!manifest.usedIgnoreBinaries.has(identifier)) {
+          configurationHints.add({ workspaceName, identifier, type: 'ignoreBinaries' });
+        }
+      }
 
-      referencedDependencies?.forEach(pkg => pkg in rootIgnoreDependencies && rootIgnoreDependencies[pkg]++);
-      referencedBinaries?.forEach(binaryName => binaryName in rootIgnoreBinaries && rootIgnoreBinaries[binaryName]++);
-
-      const dependencies = [
-        ...this.getProductionDependencies(workspaceName),
-        ...this.getDevDependencies(workspaceName),
-      ];
-      const peerDependencies = this.getPeerDependencies(workspaceName);
-
-      const isReferencedDep = (name: string) => referencedDependencies?.has(name) && dependencies.includes(name);
-      const isReferencedBin = (name: string) => referencedBinaries?.has(name) && installedBinaries?.has(name);
-
-      // Add configuration hint for dependencies/binaries in global/top-level ignores or when referenced + listed
-      ignoreDependencies
-        .filter(
-          packageName =>
-            IGNORED_DEPENDENCIES.includes(packageName) ||
-            (workspaceName !== ROOT_WORKSPACE_NAME && this.ignoreDependencies.includes(packageName)) ||
-            (!peerDependencies.includes(packageName) && isReferencedDep(packageName))
-        )
-        .forEach(identifier => configurationHints.add({ workspaceName, identifier, type: 'ignoreDependencies' }));
-
-      ignoreBinaries
-        .filter(
-          binaryName =>
-            IGNORED_GLOBAL_BINARIES.includes(binaryName) ||
-            (workspaceName !== ROOT_WORKSPACE_NAME && this.ignoreBinaries.includes(binaryName)) ||
-            isReferencedBin(binaryName)
-        )
-        .forEach(identifier => configurationHints.add({ workspaceName, identifier, type: 'ignoreBinaries' }));
+      for (const identifier of manifest.ignoreUnresolved) {
+        if (!manifest.usedIgnoreUnresolved.has(identifier)) {
+          configurationHints.add({ workspaceName, identifier, type: 'ignoreUnresolved' });
+        }
+      }
     }
 
-    const installedBinaries = this.getInstalledBinaries(ROOT_WORKSPACE_NAME);
-    const dependencies = [
-      ...this.getProductionDependencies(ROOT_WORKSPACE_NAME),
-      ...this.getDevDependencies(ROOT_WORKSPACE_NAME),
-    ];
-    const peerDependencies = this.getPeerDependencies(ROOT_WORKSPACE_NAME);
-
-    // Add configuration hint for dependencies/binaries in global ignores or when referenced + listed
-    Object.keys(rootIgnoreBinaries)
-      .filter(
-        key => IGNORED_GLOBAL_BINARIES.includes(key) || (rootIgnoreBinaries[key] !== 0 && installedBinaries?.has(key))
-      )
-      .forEach(identifier =>
-        configurationHints.add({ workspaceName: ROOT_WORKSPACE_NAME, identifier, type: 'ignoreBinaries' })
-      );
-
-    Object.keys(rootIgnoreDependencies)
-      .filter(
-        key =>
-          IGNORED_DEPENDENCIES.includes(key) ||
-          (rootIgnoreDependencies[key] === 0 && !peerDependencies.includes(key) && !dependencies.includes(key))
-      )
-      .forEach(identifier =>
-        configurationHints.add({ workspaceName: ROOT_WORKSPACE_NAME, identifier, type: 'ignoreDependencies' })
-      );
-
-    return { configurationHints };
+    return configurationHints;
   }
 }

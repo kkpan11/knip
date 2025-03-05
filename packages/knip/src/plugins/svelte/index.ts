@@ -1,29 +1,27 @@
-import { timerify } from '../../util/Performance.js';
+import type { IsPluginEnabled, Plugin } from '../../types/config.js';
 import { hasDependency } from '../../util/plugin.js';
-import { toEntryPattern, toProductionEntryPattern } from '../../util/protocols.js';
-import type { GenericPluginCallback, IsPluginEnabledCallback } from '../../types/plugins.js';
+import { config as viteConfig } from '../vite/index.js';
 
 // https://kit.svelte.dev/docs
 
-export const NAME = 'Svelte';
+const title = 'Svelte';
 
-/** @public */
-export const ENABLERS = ['svelte'];
+const enablers = ['svelte'];
 
-export const isEnabled: IsPluginEnabledCallback = ({ dependencies }) => hasDependency(dependencies, ENABLERS);
+const isEnabled: IsPluginEnabled = ({ dependencies }) => hasDependency(dependencies, enablers);
 
-/** @public */
-export const ENTRY_FILE_PATTERNS = ['svelte.config.js', 'vite.config.ts'];
+const entry = ['svelte.config.js', ...viteConfig];
 
-/** @public */
-export const PRODUCTION_ENTRY_FILE_PATTERNS = [
+const production = [
   'src/routes/**/+{page,server,page.server,error,layout,layout.server}{,@*}.{js,ts,svelte}',
+  'src/hooks.{server,client}.{js,ts}',
+  'src/params/*.{js,ts}',
 ];
 
-export const PROJECT_FILE_PATTERNS = ['src/**/*.{js,ts,svelte}'];
-
-const findSvelteDependencies: GenericPluginCallback = async () => {
-  return [...PRODUCTION_ENTRY_FILE_PATTERNS.map(toProductionEntryPattern), ...ENTRY_FILE_PATTERNS.map(toEntryPattern)];
-};
-
-export const findDependencies = timerify(findSvelteDependencies);
+export default {
+  title,
+  enablers,
+  isEnabled,
+  entry,
+  production,
+} satisfies Plugin;

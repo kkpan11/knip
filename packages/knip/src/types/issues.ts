@@ -13,14 +13,17 @@ export type IssueSymbol = { symbol: string; pos?: number; line?: number; col?: n
 export type Issue = {
   type: SymbolIssueType;
   filePath: string;
+  workspace: string;
   symbol: string;
   symbols?: IssueSymbol[];
   symbolType?: SymbolType;
   parentSymbol?: string;
+  specifier?: string;
   severity?: IssueSeverity;
   pos?: number;
   line?: number;
   col?: number;
+  isFixed?: boolean;
 };
 
 export type IssueSet = Set<string>;
@@ -29,6 +32,7 @@ export type IssueRecords = Record<string, Record<string, Issue>>;
 
 export type Issues = {
   files: IssueSet;
+  _files: Set<Issue>;
   dependencies: IssueRecords;
   devDependencies: IssueRecords;
   optionalPeerDependencies: IssueRecords;
@@ -46,7 +50,7 @@ export type Issues = {
 
 export type IssueType = keyof Issues;
 
-export type SymbolIssueType = Exclude<IssueType, 'files'>;
+export type SymbolIssueType = Exclude<IssueType, 'files' | '_files'>;
 
 export type Report = {
   [key in keyof Issues]: boolean;
@@ -58,6 +62,7 @@ export type ReporterOptions = {
   report: Report;
   issues: Issues;
   counters: Counters;
+  tagHints: TagHints;
   configurationHints: ConfigurationHints;
   noConfigHints: boolean;
   cwd: string;
@@ -78,7 +83,16 @@ export type Rules = Record<IssueType, IssueSeverity>;
 export type ConfigurationHints = Set<ConfigurationHint>;
 
 export type ConfigurationHint = {
-  type: 'ignoreBinaries' | 'ignoreDependencies' | 'ignoreWorkspaces';
-  identifier: string;
+  type: 'ignoreBinaries' | 'ignoreDependencies' | 'ignoreUnresolved' | 'ignoreWorkspaces';
+  identifier: string | RegExp;
   workspaceName?: string;
+};
+
+type TagHints = Set<TagHint>;
+
+export type TagHint = {
+  type: 'tag';
+  filePath: string;
+  identifier: string;
+  tagName: string;
 };

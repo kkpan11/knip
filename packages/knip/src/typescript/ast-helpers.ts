@@ -1,13 +1,5 @@
 import ts from 'typescript';
 
-interface ValidImportTypeNode extends ts.ImportTypeNode {
-  argument: ts.LiteralTypeNode & { literal: ts.StringLiteral };
-}
-
-export function isValidImportTypeNode(node: ts.Node): node is ValidImportTypeNode {
-  return ts.isImportTypeNode(node);
-}
-
 export function isGetOrSetAccessorDeclaration(node: ts.Node): node is ts.AccessorDeclaration {
   return node.kind === ts.SyntaxKind.SetAccessor || node.kind === ts.SyntaxKind.GetAccessor;
 }
@@ -24,7 +16,7 @@ export function isDefaultImport(
   return node.kind === ts.SyntaxKind.ImportDeclaration && !!node.importClause && !!node.importClause.name;
 }
 
-export function isAccessExpression(node: ts.Node): node is ts.PropertyAccessExpression | ts.ElementAccessExpression {
+export function isAccessExpression(node: ts.Node): node is ts.AccessExpression {
   return ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node);
 }
 
@@ -56,10 +48,6 @@ export function isPropertyAccessCall(node: ts.Node, identifier: string): node is
   );
 }
 
-export function getAccessExpressionName(node: ts.PropertyAccessExpression | ts.ElementAccessExpression) {
-  return 'argumentExpression' in node ? stripQuotes(node.argumentExpression.getText()) : node.name.getText();
-}
-
 export function stripQuotes(name: string) {
   const length = name.length;
   if (length >= 2 && name.charCodeAt(0) === name.charCodeAt(length - 1) && isQuoteOrBacktick(name.charCodeAt(0))) {
@@ -68,7 +56,7 @@ export function stripQuotes(name: string) {
   return name;
 }
 
-const enum CharacterCodes {
+enum CharacterCodes {
   backtick = 0x60,
   doubleQuote = 0x22,
   singleQuote = 0x27,
@@ -91,7 +79,8 @@ export function findAncestor<T>(
     const result = callback(node);
     if (result === 'STOP') {
       return undefined;
-    } else if (result) {
+    }
+    if (result) {
       return node as T;
     }
     node = node.parent;
@@ -108,7 +97,8 @@ export function findDescendants<T>(node: ts.Node | undefined, callback: (element
     const result = callback(node);
     if (result === 'STOP') {
       return;
-    } else if (result) {
+    }
+    if (result) {
       results.push(node as T);
     }
     ts.forEachChild(node, visit);
@@ -122,20 +112,15 @@ export function findDescendants<T>(node: ts.Node | undefined, callback: (element
 export const isDeclarationFileExtension = (extension: string) =>
   extension === '.d.ts' || extension === '.d.mts' || extension === '.d.cts';
 
-export const isInModuleBlock = (node: ts.Node) => {
-  node = node?.parent;
-  while (node) {
-    if (ts.isModuleBlock(node)) return true;
-    node = node.parent;
-  }
-  return false;
-};
-
 export const getJSDocTags = (node: ts.Node) => {
   const tags = new Set<string>();
   let tagNodes = ts.getJSDocTags(node);
   if (ts.isExportSpecifier(node) || ts.isBindingElement(node)) {
     tagNodes = [...tagNodes, ...ts.getJSDocTags(node.parent.parent)];
+  } else if (ts.isEnumMember(node) || ts.isClassElement(node)) {
+    tagNodes = [...tagNodes, ...ts.getJSDocTags(node.parent)];
+  } else if (ts.isCallExpression(node)) {
+    tagNodes = [...tagNodes, ...ts.getJSDocTags(node.parent)];
   }
   for (const tagNode of tagNodes) {
     const match = tagNode.getText()?.match(/@\S+/);
@@ -148,3 +133,100 @@ export const getLineAndCharacterOfPosition = (node: ts.Node, pos: number) => {
   const { line, character } = node.getSourceFile().getLineAndCharacterOfPosition(pos);
   return { line: line + 1, col: character + 1, pos };
 };
+
+const getMemberStringLiterals = (typeChecker: ts.TypeChecker, node: ts.Node) => {
+  if (ts.isElementAccessExpression(node)) {
+    if (ts.isStringLiteral(node.argumentExpression)) return [node.argumentExpression.text];
+    const type = typeChecker.getTypeAtLocation(node.argumentExpression);
+    if (type.isUnion()) return type.types.map(type => (type as ts.LiteralType).value as string);
+  }
+
+  if (ts.isPropertyAccessExpression(node)) {
+    return [node.name.escapedText as string];
+  }
+};
+
+export const getAccessMembers = (typeChecker: ts.TypeChecker, node: ts.Identifier) => {
+  let members: string[] = [];
+  let current: ts.Node = node.parent;
+  while (current) {
+    const ms = getMemberStringLiterals(typeChecker, current);
+    if (!ms) break;
+    const joinIds = (id: string) => (members.length === 0 ? id : members.map(ns => `${ns}.${id}`));
+    members = members.concat(ms.flatMap(joinIds));
+    current = current.parent;
+  }
+  return members;
+};
+
+export const isDestructuring = (node: ts.Node) =>
+  node.parent &&
+  ts.isVariableDeclaration(node.parent) &&
+  ts.isVariableDeclarationList(node.parent.parent) &&
+  ts.isObjectBindingPattern(node.parent.name);
+
+export const getDestructuredIds = (name: ts.ObjectBindingPattern) =>
+  name.elements.map(element => element.name.getText());
+
+export const isConsiderReferencedNS = (node: ts.Identifier) =>
+  ts.isPropertyAssignment(node.parent) ||
+  ts.isShorthandPropertyAssignment(node.parent) ||
+  (ts.isCallExpression(node.parent) && node.parent.arguments.includes(node)) ||
+  ts.isSpreadAssignment(node.parent) ||
+  ts.isArrayLiteralExpression(node.parent) ||
+  ts.isExportAssignment(node.parent) ||
+  (ts.isVariableDeclaration(node.parent) && node.parent.initializer === node) ||
+  ts.isTypeQueryNode(node.parent);
+
+const objectEnumerationMethods = new Set(['keys', 'entries', 'values', 'getOwnPropertyNames']);
+export const isObjectEnumerationCallExpressionArgument = (node: ts.Identifier) =>
+  ts.isCallExpression(node.parent) &&
+  node.parent.arguments.includes(node) &&
+  ts.isPropertyAccessExpression(node.parent.expression) &&
+  ts.isIdentifier(node.parent.expression.expression) &&
+  node.parent.expression.expression.escapedText === 'Object' &&
+  objectEnumerationMethods.has(String(node.parent.expression.name.escapedText));
+
+export const isInForIteration = (node: ts.Node) =>
+  node.parent && (ts.isForInStatement(node.parent) || ts.isForOfStatement(node.parent));
+
+export const isTopLevel = (node: ts.Node) =>
+  ts.isSourceFile(node.parent) || (node.parent && ts.isSourceFile(node.parent.parent));
+
+export const getTypeRef = (node: ts.Identifier) => {
+  if (!node.parent?.parent) return;
+  return findAncestor<ts.TypeReferenceNode>(node, _node => ts.isTypeReferenceNode(_node));
+};
+
+export const isImportSpecifier = (node: ts.Node) =>
+  ts.isImportSpecifier(node.parent) ||
+  ts.isImportEqualsDeclaration(node.parent) ||
+  ts.isImportClause(node.parent) ||
+  ts.isNamespaceImport(node.parent);
+
+const isInExportedNode = (node: ts.Node): boolean => {
+  if (getExportKeywordNode(node)) return true;
+  return node.parent ? isInExportedNode(node.parent) : false;
+};
+
+export const isReferencedInExport = (node: ts.Node) => {
+  if (ts.isTypeQueryNode(node.parent) && isInExportedNode(node.parent.parent)) return true;
+  if (ts.isTypeReferenceNode(node.parent) && isInExportedNode(node.parent.parent)) return true;
+  return false;
+};
+
+export const getExportKeywordNode = (node: ts.Node) =>
+  // @ts-expect-error Property 'modifiers' does not exist on type 'Node'.
+  (node.modifiers as ts.Modifier[])?.find(mod => mod.kind === ts.SyntaxKind.ExportKeyword);
+
+export const getDefaultKeywordNode = (node: ts.Node) =>
+  // @ts-expect-error Property 'modifiers' does not exist on type 'Node'.
+  (node.modifiers as ts.Modifier[])?.find(mod => mod.kind === ts.SyntaxKind.DefaultKeyword);
+
+export const hasRequireCall = (node: ts.Node): boolean => {
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') return true;
+  return node.getChildren().some(child => hasRequireCall(child));
+};
+
+export const isModuleExportsAccess = (node: ts.PropertyAccessExpression) =>
+  ts.isIdentifier(node.expression) && node.expression.escapedText === 'module' && node.name.escapedText === 'exports';

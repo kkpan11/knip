@@ -2,6 +2,7 @@
 module.exports = {
   ...require('./jest.config.shared'),
   displayName: 'dev',
+  runtime: '@side/jest-runtime',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   setupFiles: [],
   moduleNameMapper: {
@@ -13,7 +14,11 @@ module.exports = {
   reporters: [
     'default',
     'jest-silent-reporter',
-    ['jest-junit', { outputDirectory: 'reports', outputName: 'report.xml' }],
+    ['jest-junit', {
+      outputDirectory: 'reports', outputName: 'report.xml',
+      testSuitePropertiesFile: 'customSuiteProperties.cjs',
+      testSuitePropertiesDirectory: '<rootDir>',
+     }],
     ['github-actions', { silent: false }],
     'summary',
   ],
@@ -25,4 +30,5 @@ module.exports = {
     },
   ],
   testResultsProcessor: 'jest-phabricator',
+  snapshotResolver: '<rootDir>/snapshotResolver.js',
 };

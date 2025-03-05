@@ -16,12 +16,6 @@ Shortcut: `-V`
 
 Print the version number.
 
-### `--debug`
-
-Shortcut: `-d`
-
-Show debug output.
-
 ### `--no-progress`
 
 Shortcut: `-n`
@@ -32,6 +26,35 @@ environments.
 ### `--no-config-hints`
 
 Suppress configuration hints.
+
+### `knip-bun`
+
+Run Knip using the Bun runtime (instead of Node.js + jiti).
+
+```shell
+knip-bun
+```
+
+This is equal to `bunx --bun knip`
+
+Requires [Bun][1] to be installed. Also see [known issues][2] for the type of
+issues this might help with.
+
+### NO_COLOR
+
+The default reporters use the [NO_COLOR][3] friendly [picocolors][4]:
+
+```sh
+NO_COLOR=1 knip
+```
+
+## Troubleshooting
+
+### `--debug`
+
+Shortcut: `-d`
+
+Show debug output.
 
 ### `--performance`
 
@@ -49,7 +72,7 @@ findGithubActionsDependencies     6      0.16     12.71      0.65     23.45
 findBabelDependencies             2      0.00     38.75     19.37     38.75
 ...
 
-Total running time: 5s
+Total running time: 5s (mem: 631.27MB)
 ```
 
 - `name`: the internal Knip function name
@@ -58,6 +81,23 @@ Total running time: 5s
 - `max`: the slowest invocation
 - `median`: the median invocation
 - `sum` the accumulated time of all invocations
+
+This is not yet available in Bun, since it does not support
+`performance.timerify` ([GitHub issue][5]).
+
+### `--trace`
+
+Trace exports to see where they are imported.
+
+Also see [Trace][6].
+
+### `--trace-export [name]`
+
+Trace export name to see where it's imported. Implies [--trace][7].
+
+### `--trace-file [path]`
+
+Trace file to see where its exports are imported. Implies [--trace][7].
 
 ## Configuration
 
@@ -77,13 +117,17 @@ Shortcut: `-c`
 
 ### `--tsConfig [file]`
 
+Shortcut: `-t`
+
 Use an alternative path for the TypeScript configuration file.
+
+Using `-t jsconfig.json` is also supported.
 
 Default location: `tsconfig.json`
 
 ### `--workspace [dir]`
 
-[Lint a single workspace][1] including its ancestor and dependent workspaces.
+[Lint a single workspace][8] including its ancestor and dependent workspaces.
 The default behavior is to lint all configured workspaces.
 
 Shortcut: `-W`
@@ -107,7 +151,25 @@ files when reporting unused exports:
 knip --include-entry-exports
 ```
 
-Also see [includeEntryExports][2].
+Also see [includeEntryExports][9].
+
+### `--include-libs`
+
+Getting false positives for exports consumed by external libraries? Try the
+`--include-libs` flag:
+
+```sh
+knip --include-libs
+```
+
+Also see [external libs][10].
+
+### `--isolate-workspaces`
+
+By default, Knip optimizes performance using [workspace sharing][11] to existing
+TypeScript programs, based on the compatibility of their `compilerOptions`. This
+flag disables this behavior and creates one program per workspace, which is
+slower but memory is spread more evenly over time.
 
 ## Modes
 
@@ -121,21 +183,49 @@ Lint only production source files. This excludes:
   - Storybook stories
 - `devDependencies` from `package.json`
 
-Read more at [Production Mode][3].
+Read more at [Production Mode][12].
 
 ### `--strict`
 
-Isolate workspaces and consider only direct dependencies.
+Isolate workspaces and consider only direct dependencies. Implies [production
+mode][13].
 
-Read more at [Production Mode][3].
+Read more at [Production Mode][12].
+
+### `--fix`
+
+Read more at [auto-fix][14].
+
+### `--cache`
+
+Enable caching.
+
+Consecutive runs are 10-40% faster as the results of file analysis (AST
+traversal) are cached. Conservative. Cache strategy based on file meta data
+(modification time + file size).
+
+### `--cache-location`
+
+Provide alternative cache location.
+
+Default location: `./node_modules/.cache/knip`
+
+### `--watch`
+
+Watch current directory, and update reported issues when a file is modified,
+added or deleted.
+
+Watch mode focuses on imports and exports in source files. During watch mode,
+changes in `package.json` and/or `node_modules` are not supported.
 
 ## Filters
 
-Available [issue types][4] when filtering output using `--include` or
+Available [issue types][15] when filtering output using `--include` or
 `--exclude`:
 
 - `files`
 - `dependencies`
+- `optionalPeerDependencies`
 - `unlisted`
 - `unresolved`
 - `exports`
@@ -148,7 +238,7 @@ Available [issue types][4] when filtering output using `--include` or
 
 ### `--exclude`
 
-Exclude provided issue type(s) from report. Can be comma-separated or repeated.
+Exclude provided issue types from report. Can be comma-separated or repeated.
 
 Example:
 
@@ -159,7 +249,7 @@ knip --exclude classMembers --exclude enumMembers
 
 ### `--include`
 
-Report only provided issue type(s). Can be comma-separated or repeated.
+Report only provided issue types. Can be comma-separated or repeated.
 
 Example:
 
@@ -173,7 +263,7 @@ knip --include files --include dependencies
 Shortcut to include all types of dependency issues:
 
 ```sh
---include dependencies,unlisted,binaries,unresolved
+--include dependencies,optionalPeerDependencies,unlisted,binaries,unresolved
 ```
 
 ### `--exports`
@@ -182,6 +272,44 @@ Shortcut to include all types of export issues:
 
 ```sh
 --include exports,nsExports,classMembers,types,nsTypes,enumMembers,duplicates
+```
+
+### `--experimental-tags`
+
+Deprecated. Use [--tags][16] instead.
+
+### `--tags`
+
+Exports can be tagged with known or arbitrary JSDoc/TSDoc tags:
+
+```ts
+/**
+ * Description of my exported value
+ *
+ * @type number
+ * @internal
+ * @custom Unimportant matters
+ */
+export const myExport = 1;
+```
+
+And then include (`+`) or exclude (`-`) these tagged exports from the report
+like so:
+
+```shell
+knip --tags=+custom
+knip --tags=-custom,-internal
+```
+
+This way, you can either focus on or ignore specific tagged exports with tags
+you define yourself. This also works for individual class or enum members.
+
+The default directive is `+` (include) and the `@` prefix is ignored, so the
+notation below is valid and will report only exports tagged `@custom` or
+`@internal`:
+
+```shell
+knip --tags @custom --tags @internal
 ```
 
 ## Reporters & Preprocessors
@@ -194,7 +322,7 @@ Available reporters:
 - `compact`
 - `codeowners`
 - `json`
-- `jsonExt`
+- `markdown`
 
 Can be repeated. Example:
 
@@ -202,7 +330,7 @@ Can be repeated. Example:
 knip --reporter compact
 ```
 
-Also see [Reporters & Preprocessors][5].
+Also see [Reporters & Preprocessors][17].
 
 ### `--reporter-options [json]`
 
@@ -217,7 +345,7 @@ knip --reporter codeowners --reporter-options '{"path":".github/CODEOWNERS"}'
 
 ### `--preprocessor [preprocessor]`
 
-Preprocess the results before providing it to the reporter(s).
+Preprocess the results before providing it to the reporters.
 
 Can be repeated. Examples:
 
@@ -237,7 +365,7 @@ Pass extra options to the preprocessor as JSON string.
 knip --preprocessor ./preproc.ts --preprocessor-options '{"key":"value"}'
 ```
 
-Also see [Reporters & Preprocessors][5].
+Also see [Reporters & Preprocessors][17].
 
 ## Exit code
 
@@ -245,20 +373,32 @@ The default exit codes:
 
 | Code | Description                                                      |
 | :--: | :--------------------------------------------------------------- |
-| `0`  | Knip ran successfully, no lint errors                            |
-| `1`  | Knip ran successfully, but there is at least one lint error      |
+| `0`  | Knip ran successfully, no lint issues                            |
+| `1`  | Knip ran successfully, but there is at least one lint issues     |
 | `2`  | Knip did not run successfully due to bad input or internal error |
 
 ### `--no-exit-code`
 
-Always exit with code zero (`0`), even when there are lint errors.
+Always exit with code zero (`0`), even when there are lint issues.
 
 ### `--max-issues`
 
 Maximum number of issues before non-zero exit code. Default: `0`
 
-[1]: ../features/monorepos-and-workspaces.md#lint-a-single-workspace
-[2]: ./configuration.md#includeentryexports
-[3]: ../features/production-mode.md
-[4]: ./issue-types.md
-[5]: ../features/reporters.md
+[1]: https://bun.sh
+[2]: ../reference/known-issues.md
+[3]: https://no-color.org/
+[4]: https://www.npmjs.com/package/picocolors
+[5]: https://github.com/oven-sh/bun/issues/9271
+[6]: ../guides/troubleshooting.md#trace
+[7]: #--trace
+[8]: ../features/monorepos-and-workspaces.md#lint-a-single-workspace
+[9]: ./configuration.md#includeentryexports
+[10]: ../guides/handling-issues.mdx#external-libraries
+[11]: ../guides/performance.md#workspace-sharing
+[12]: ../features/production-mode.md
+[13]: #--production
+[14]: ../features/auto-fix.mdx
+[15]: ./issue-types.md
+[16]: #--tags
+[17]: ../features/reporters.md

@@ -1,49 +1,29 @@
-import { _getDependenciesFromScripts } from '../binaries/index.js';
-import { isDefinitelyTyped } from '../util/modules.js';
+import type { HostDependencies, InstalledBinaries } from '../types/workspace.js';
 import { timerify } from '../util/Performance.js';
-import { getPackageManifest } from './helpers.js';
-import type { InstalledBinaries, HostDependencies } from '../types/workspace.js';
-import type { PackageJson } from '@npmcli/package-json';
+import { isDefinitelyTyped } from '../util/modules.js';
+import { loadPackageManifest } from './helpers.js';
 
 type Options = {
-  manifest: PackageJson;
-  isProduction: boolean;
-  isStrict: boolean;
+  packageNames: string[];
   dir: string;
   cwd: string;
 };
 
-const findManifestDependencies = async ({ manifest, isProduction, isStrict, dir, cwd }: Options) => {
-  const scriptFilter = isProduction ? ['start', 'postinstall'] : [];
+const getMetaDataFromPackageJson = ({ cwd, dir, packageNames }: Options) => {
   const hostDependencies: HostDependencies = new Map();
-
-  const scripts = Object.entries(manifest.scripts ?? {}).reduce((scripts, [scriptName, script]) => {
-    if (script && (scriptFilter.length === 0 || scriptFilter.includes(scriptName))) {
-      scripts.push(script);
-    }
-    return scripts;
-  }, [] as string[]);
-
-  const dependencies = _getDependenciesFromScripts(scripts, { cwd: dir, manifest });
 
   // Find all binaries for each dependency
   const installedBinaries: InstalledBinaries = new Map();
 
   const hasTypesIncluded = new Set<string>();
 
-  const packageNames = [
-    ...Object.keys(manifest.dependencies ?? {}),
-    ...(isStrict ? Object.keys(manifest.peerDependencies ?? {}) : []),
-    ...(isProduction ? [] : Object.keys(manifest.devDependencies ?? {})),
-  ];
-
   for (const packageName of packageNames) {
-    const manifest = await getPackageManifest({ dir, packageName, cwd });
+    const manifest = loadPackageManifest({ cwd, dir, packageName });
     if (manifest) {
       // Read and store installed binaries
       const binaryName = packageName.replace(/^@[^/]+\//, '');
       const binaries = typeof manifest.bin === 'string' ? [binaryName] : Object.keys(manifest.bin ?? {});
-      binaries.forEach(binaryName => {
+      for (const binaryName of binaries) {
         if (installedBinaries.has(binaryName)) {
           installedBinaries.get(binaryName)?.add(packageName);
         } else {
@@ -54,28 +34,31 @@ const findManifestDependencies = async ({ manifest, isProduction, isStrict, dir,
         } else {
           installedBinaries.set(packageName, new Set([binaryName]));
         }
-      });
+      }
 
       // Read and store peer dependencies
       const packagePeerDependencies = Object.keys(manifest.peerDependencies ?? {});
-      packagePeerDependencies.forEach(packagePeerDependency => {
+      for (const packagePeerDependency of packagePeerDependencies) {
+        const hostDependency = {
+          name: packageName,
+          isPeerOptional: manifest.peerDependenciesMeta?.[packagePeerDependency]?.optional ?? false,
+        };
         if (hostDependencies.has(packagePeerDependency)) {
-          hostDependencies.get(packagePeerDependency)?.add(packageName);
+          hostDependencies.get(packagePeerDependency)?.push(hostDependency);
         } else {
-          hostDependencies.set(packagePeerDependency, new Set([packageName]));
+          hostDependencies.set(packagePeerDependency, [hostDependency]);
         }
-      });
+      }
 
       if (!isDefinitelyTyped(packageName) && (manifest.types || manifest.typings)) hasTypesIncluded.add(packageName);
     }
   }
 
   return {
-    dependencies,
     hostDependencies,
     installedBinaries,
     hasTypesIncluded,
   };
 };
 
-export const findDependencies = timerify(findManifestDependencies);
+export const getDependencyMetaData = timerify(getMetaDataFromPackageJson);

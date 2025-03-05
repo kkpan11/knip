@@ -1,36 +1,44 @@
+import type { IsPluginEnabled, Plugin, Resolve } from '../../types/config.js';
+import { toDependency } from '../../util/input.js';
 import { hasDependency } from '../../util/plugin.js';
-import { toEntryPattern, toProductionEntryPattern } from '../../util/protocols.js';
-import type { GenericPluginCallback, IsPluginEnabledCallback } from '../../types/plugins.js';
 
 // https://docs.astro.build/en/reference/configuration-reference/
 
-export const NAME = 'Astro';
+const title = 'Astro';
 
-/** @public */
-export const ENABLERS = ['astro'];
+const enablers = ['astro'];
 
-export const isEnabled: IsPluginEnabledCallback = ({ dependencies }) => hasDependency(dependencies, ENABLERS);
+const isEnabled: IsPluginEnabled = ({ dependencies }) => hasDependency(dependencies, enablers);
 
-/** @public */
-export const ENTRY_FILE_PATTERNS = ['astro.config.{js,cjs,mjs,ts}', 'src/content/config.ts'];
+const entry = ['astro.config.{js,cjs,mjs,ts}', 'src/content/config.ts', 'src/content.config.ts'];
 
-/** @public */
-export const PRODUCTION_ENTRY_FILE_PATTERNS = ['src/pages/**/*.{astro,mdx,js,ts}', 'src/content/**/*.mdx'];
+const production = [
+  'src/pages/**/*.{astro,mdx,js,ts}',
+  'src/content/**/*.mdx',
+  'src/middleware.{js,ts}',
+  'src/actions/index.{js,ts}',
+];
 
-export const findDependencies: GenericPluginCallback = async (configFilePath, options) => {
-  const { config, manifest, isProduction } = options;
-
-  const dependencies = config.entry
-    ? config.entry.map(toProductionEntryPattern)
-    : [...ENTRY_FILE_PATTERNS.map(toEntryPattern), ...PRODUCTION_ENTRY_FILE_PATTERNS.map(toProductionEntryPattern)];
+const resolve: Resolve = options => {
+  const { manifest, isProduction } = options;
+  const inputs = [];
 
   if (
     !isProduction &&
     manifest.scripts &&
-    Object.values(manifest.scripts).some(script => /astro (--.+ )?check/.test(script))
+    Object.values(manifest.scripts).some(script => /(?<=^|\s)astro(\s|\s.+\s)check(?=\s|$)/.test(script))
   ) {
-    dependencies.push('@astrojs/check');
+    inputs.push(toDependency('@astrojs/check'));
   }
 
-  return dependencies;
+  return inputs;
 };
+
+export default {
+  title,
+  enablers,
+  isEnabled,
+  entry,
+  production,
+  resolve,
+} satisfies Plugin;

@@ -5,15 +5,21 @@ interface VitestConfig {
       enabled?: boolean;
       provider: string;
     };
+    root?: string;
     environment?: string;
     globalSetup?: string | string[];
-    reporters?: (string | unknown)[];
+    reporters?: (string | [string, unknown] | unknown)[];
     setupFiles?: string | string[];
   };
 }
 
 export interface ViteConfig extends VitestConfig {
-  plugins: unknown[];
+  plugins?: unknown[];
+  build?: {
+    lib?: {
+      entry: string | string[] | { [entryAlias: string]: string };
+    };
+  };
 }
 
 export type COMMAND = 'dev' | 'serve' | 'build';

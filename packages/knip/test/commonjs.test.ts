@@ -1,11 +1,11 @@
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { main } from '../src/index.js';
 import { resolve } from '../src/util/path.js';
 import baseArguments from './helpers/baseArguments.js';
 import baseCounters from './helpers/baseCounters.js';
 
-test('Support CommonJS-style imports and exports', async () => {
+test('Support CommonJS-style imports and exports (w/o tsconfig.json)', async () => {
   const cwd = resolve('fixtures/commonjs');
 
   const { issues, counters } = await main({
@@ -13,6 +13,7 @@ test('Support CommonJS-style imports and exports', async () => {
     cwd,
   });
 
+  assert(issues.exports['dir/exports.js']['unused']);
   assert(issues.exports['dir/mod1.js']['identifier2']);
 
   assert(issues.unlisted['index.js']['side-effects']);
@@ -26,9 +27,9 @@ test('Support CommonJS-style imports and exports', async () => {
 
   assert.deepEqual(counters, {
     ...baseCounters,
-    exports: 1,
+    exports: 2,
     unlisted: 8,
-    processed: 6,
-    total: 6,
+    processed: 8,
+    total: 8,
   });
 });

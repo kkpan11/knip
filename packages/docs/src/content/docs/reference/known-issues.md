@@ -2,51 +2,66 @@
 title: Known Issues
 ---
 
-This page contains a list of known issues when running Knip.
+This page contains a list of known issues you might run into when using Knip:
 
-## TS config files using ESM features
+- [Exceptions from config files][1]
+- [False positives with external libs][2]
+- [DefinitelyTyped packages in dependencies][3]
+- [Extensionless imports][4]
 
-Knip may fail when a plugin tries to load a configuration file written in
-TypeScript with an error message like one of these:
+## Exceptions from config files
 
-```sh
-SyntaxError: Cannot use 'import.meta' outside a module
-...
-SyntaxError: await is only valid in async functions and the top level bodies of modules
-...
-SyntaxError: missing ) after argument list
+An exception may be thrown when a Knip plugin loads a JavaScript or TypeScript
+configuration file such as `webpack.config.js` or `vite.config.ts`. Knip may
+load such files differently, in a different environment, or without certain
+environment variables set.
+
+If it isn't clear what's throwing the exception, try another run with `--debug`
+to locate the cause of the issue with more details. Sometimes the issue is a
+missing environment variable. As a last resort, the [plugin can be disabled][5].
+
+## Path aliases in config files
+
+Loading the configuration file (e.g. `cypress.config.ts`) for one of Knip's
+plugins may give an error:
+
+```
+Analyzing workspace ....
+Error loading .../cypress.config.ts
+Reason: Cannot find module '@alias/name'
+Require stack:
+- .../cypress.config.ts
 ```
 
-This is caused by Knip using [jiti][1] to load and execute your configuration
-files with the `.ts` (or `.mts` or `.cts`) extension, which may incorrectly
-consider it as CommonJS (instead of ESM).
+Some tools (such as Cypress and Jest) support using TypeScript path aliases in
+the configuration file. Jiti does support aliases, but in a different format
+compared to `tsconfig.json#compilerOptions.paths` and `knip.json#paths` (e.g.
+the target values are not arrays).
 
 Potential workarounds:
 
-- Turn the configuration file from TS into JS (e.g. `vitest.config.ts` →
-  `vitest.config.js`). Knip loads modules directly using native `import()`
-  calls. This is the recommended workaround.
-- Add the config file to the list of [ignore][2] patterns.
-- [Disable the plugin][3].
+- Rewrite the import in the configuration file to a relative import.
+- Use Bun with [knip-bun][6].
+- [Disable the plugin][5] (not recommended, try the other options first).
 
-If necessary, you can use `knip --debug` to locate where the error is coming
-from.
+## Nx Daemon
 
-The issue is hopefully fixed in [jiti v2][4]. By the way, nothing but love for
-jiti (it's awesome).
-
-## Reflect.metadata is not a function
-
-Similar to the previous known issue, this is caused through (not by) jiti:
+In Nx projects you might encounter this error:
 
 ```sh
-TypeError: Reflect.metadata is not a function
+NX   Daemon process terminated and closed the connection
 ```
 
-[GitHub Issue #355][5]
+The solution is to [disable the Nx Daemon][7]:
 
-[1]: https://github.com/unjs/jiti
-[2]: ./configuration.md#ignore
-[3]: ./configuration.md#plugins
-[4]: https://github.com/unjs/jiti/issues/174
-[5]: https://github.com/webpro/knip/issues/355
+```sh
+NX_DAEMON=false knip
+```
+
+[1]: #exceptions-from-config-files
+[2]: #false-positives-with-external-libs
+[3]: #definitely-typed-packages-in-dependencies
+[4]: #extensionless-imports
+[5]: ./configuration.md#plugins
+[6]: ./cli.md#knip-bun
+[7]: https://nx.dev/concepts/nx-daemon#turning-it-off
